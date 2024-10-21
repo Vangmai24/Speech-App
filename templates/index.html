@@ -1,1 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blush Speech App</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #FF69B4;
+            --secondary-color: #FFF0F5;
+            --text-color: #333;
+            --card-bg-color: #FFFFFF;
+            --card-shadow: 0 10px 20px rgba(255, 105, 180, 0.1);
+            --card-hover-shadow: 0 15px 30px rgba(255, 105, 180, 0.2);
+        }
 
+        body {
+            font-family: 'Montserrat', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--secondary-color);
+            color: var(--text-color);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        h1, h2 {
+            font-family: 'Playfair Display', serif;
+            color: var(--primary-color);
+            text-align: center;
+        }
+
+        h1 { font-size: 3em; margin-bottom: 30px; }
+        h2 { font-size: 2em; margin-top: 40px; }
+
+        .card {
+            background-color: var(--card-bg-color);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: var(--card-shadow);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--card-hover-shadow);
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;  
+            margin: 10px 5px;
+        }
+
+        button:hover { background-color: #FF1493; }
+        button:active { transform: scale(0.98); }
+
+        textarea {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #FFB6C1;
+            border-radius: 10px;
+            font-size: 1em;
+            margin-bottom: 20px;
+            resize: vertical;
+        }
+
+        audio { width: 100%; margin-top: 20px; }
+
+        .result-display {
+            background-color: #FFE4E1;
+            padding: 15px;
+            border-radius: 10px;
+            font-style: italic;
+            margin-top: 20px;
+        }
+
+        .file-links {
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        .file-links a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .file-links a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Blush Speech App</h1>
+        
+        <div class="card">
+            <h2>Speech to Text</h2>
+            <button onclick="startRecording()" id="startBtn">Start Recording</button>
+            <button onclick="stopRecording()" id="stopBtn">Stop Recording</button>
+            <audio id="audioPlayer" controls></audio>
+            <button onclick="uploadAudio()">Transcribe</button>
+            <p id="transcription" class="result-display">Your transcription will appear here...</p>
+            <p id="sentiment" class="result-display">Sentiment will appear here...</p>
+            <div id="sttLink" class="file-links"></div>
+        </div>
+        
+        <div class="card">
+            <h2>Text to Speech</h2>
+            <textarea id="textInput" rows="4" placeholder="Enter text to convert to speech..."></textarea>
+            <button onclick="generateSpeech()">Generate Speech</button>
+            <audio id="ttsAudioPlayer" controls></audio>
+            <p id="ttsSentiment" class="result-display">Sentiment will appear here...</p>
+            <div id="ttsLinks" class="file-links"></div>
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+
+        function startRecording() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+                    mediaRecorder.start();
+                    document.getElementById('startBtn').style.backgroundColor = '#FF1493';
+                    vibrateDevice(100);
+                })
+                .catch(error => {
+                    console.error('Error accessing microphone:', error);
+                });
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    document.getElementById('audioPlayer').src = URL.createObjectURL(audioBlob);
+                };
+                document.getElementById('startBtn').style.backgroundColor = '#FF69B4';
+                vibrateDevice([100, 50, 100]);
+            }
+        }
+
+        function uploadAudio() {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'recording.webm');
+
+            fetch('/speech-to-text', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.transcript) {
+                    updateSpeechToTextResults(data);
+                    vibrateDevice([100, 50, 100]);
+                } else if (data.error) {
+                    handleError(data.error, 'transcription');
+                }
+            })
+            .catch(error => {
+                console.error('Error uploading audio:', error);
+                handleError('Error uploading audio', 'transcription');
+            });
+
+            audioChunks = [];
+        }
+
+        function generateSpeech() {
+            const text = document.getElementById('textInput').value;
+
+            fetch('/text-to-speech', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            })
+            .then(response => response.json())
+            .then(data => {
+                updateTextToSpeechResults(data);
+                vibrateDevice([100, 50, 100, 50, 100]);
+            })
+            .catch(error => {
+                console.error('Error generating speech:', error);
+                vibrateDevice(500);
+            });
+        }
+
+        function updateSpeechToTextResults(data) {
+            document.getElementById('transcription').innerText = data.transcript;
+            document.getElementById('sentiment').innerText = "Sentiment: " + data.sentiment;
+            document.getElementById('sttLink').innerHTML = `
+                <p>Text file: <a href="${data.text_file}" target="_blank">${data.text_file}</a></p>
+            `;
+        }
+
+        function updateTextToSpeechResults(data) {
+            const audioPlayer = document.getElementById('ttsAudioPlayer');
+            audioPlayer.src = data.audio;
+            document.getElementById('ttsSentiment').innerText = "Sentiment: " + data.sentiment;
+            document.getElementById('ttsLinks').innerHTML = `
+                <p>Text file: <a href="${data.text_file}" target="_blank">${data.text_file}</a></p>
+                <p>Audio file: <a href="${data.audio_file}" target="_blank">${data.audio_file}</a></p>
+            `;
+        }
+
+        function handleError(errorMessage, elementId) {
+            document.getElementById(elementId).innerText = "Error: " + errorMessage;
+            vibrateDevice(500);
+        }
+
+        function vibrateDevice(pattern) {
+            if (window.navigator.vibrate) {
+                window.navigator.vibrate(pattern);
+            }
+        }
+    </script>
+</body>
+</html>
